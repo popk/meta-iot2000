@@ -27,18 +27,15 @@ def displayStartScreen():
 	device = task.stdout.read().lstrip().rstrip()
 		
 	# Check if WLAN hardware is available	
-	with open("/etc/network/interfaces", "r") as interfacesFile:
-		interfacesContent=interfacesFile.read()
-	
-	wifiEnabled = "wlan" in interfacesContent
+	wifiEnabled = os.path.isdir("/sys/class/net/wlan0")
 	
 	
 	title = device + " Setup"
-	menuItems = [	"Change Root Password", "Change Host Name", 
-					"Expand File System", "Configure Network Interfaces", 
-					"Set up OPKG Repository", 
+	menuItems = [	"Change Root Password", "Change Host Name",
+					"Expand File System", "Configure Network Interfaces",
+					"Set up OPKG Repository",
 					"Remove Unused Packages"]
-	
+		
 	if (device == "IOT2020"):
 		deviceIsIot2020 = True
 	
@@ -61,11 +58,11 @@ def displayStartScreen():
 			print(chr(27) + "[2J") # Clear console
 			print("Restarting network services...")
 			subprocess.call("/etc/init.d/networking restart", shell=True)
-			subprocess.call("/sbin/ifdown wlan0", shell=True)
-			subprocess.call("/sbin/ifup wlan0", shell=True)
+			if (wifiEnabled):
+				subprocess.call("/sbin/ifdown wlan0", shell=True)
+				subprocess.call("/sbin/ifup wlan0", shell=True)
 		
 		exit()
-	print (selection)
 	
 	if selection == 0:
 		changeRootPassword()
@@ -83,9 +80,9 @@ def displayStartScreen():
 		if (not deviceIsIot2020):
 			configureSerial()
 		elif wifiEnabled:
-			configureWlan()
+			configureWLAN()
 	elif selection == 7:
-		configureWlan()
+		configureWLAN()
 
 def changeRootPassword():
 	print(chr(27) + "[2J") # Clear console 
@@ -99,8 +96,6 @@ def removeUnusedPackages():
 												# candidates for removal
 	###
 	
-	
-
 	packageScreen = SnackScreen()
 	bb = ButtonBar(packageScreen, (("Ok", "ok"), ("Cancel", "cancel")))
 	ct = CheckboxTree(height = 10, scroll = 1,width=40)
@@ -130,7 +125,7 @@ def removeUnusedPackages():
 		for package in selectedPackages:
 			removeList = removeList + package + '* '
 		
-		rv = ButtonChoiceWindow(
+		ret = ButtonChoiceWindow(
 			packageScreen,
 			"Remove Packages",
 			"Are you sure you want to remove the following packages: \n\n" + removeList,
@@ -139,7 +134,7 @@ def removeUnusedPackages():
 		
 		packageScreen.finish()
 				
-		if (rv == "ok"):	
+		if (ret == "ok"):	
 			removeList = "/usr/bin/opkg --force-removal-of-dependent-packages remove " + removeList
 			print(chr(27) + "[2J") # Clear console 
 			print("Removing selected packages...")
@@ -191,6 +186,7 @@ def changeHostName():
 		70, 50,
 		[('OK'), ('Cancel', 'cancel', 'ESC')],
 		None)
+		
 	if ret[0] == "ok":
 		hostScreen.finish()
 		subprocess.Popen(["hostname", ret[1][0].rstrip()], stdout=open(os.devnull, 'wb'))
@@ -277,21 +273,29 @@ network={
 	displayStartScreen()
 
 def getNetworkInterfaceConfiguration(interface):
+
 	lines = [line.rstrip('\n') for line in open('/etc/network/interfaces')]
 	for lineNumber in range(0, len(lines)-1):
-		if ("auto " + interface in lines[lineNumber]):
-			while (lines[lineNumber].split()[0] != interface):
+		searchString = "auto " + interface
+	
+		if (searchString in lines[lineNumber]):
+			splitLine = lines[lineNumber].split()
+			
+			while (splitLine[0] != "iface"):
 				lineNumber += 1
-			mode = lines[lineNumber].split()[3]
-
+				splitLine = lines[lineNumber].split()
+		
+			mode = splitLine[3]
+			
 			if (mode == "dhcp"):
 				return "dhcp"
 			if (mode == "static"):
-				return "12323"
-			print (mode)
-			time.sleep(10)
-
-			
+				while (splitLine[0] != "address"):
+					lineNumber += 1
+					splitLine = lines[lineNumber].split()
+				return splitLine[1]
+		lineNumber += 1
+	return "dhcp"	
 
 def configureNetworkInterfaces():
 	global networkConfigurationChanged
@@ -301,12 +305,12 @@ def configureNetworkInterfaces():
 	networkScreen = SnackScreen()
 	getNetworkInterfaceConfiguration('eth0')
 	if deviceIsIot2020:
-		interfaces = ([('eth0', '192.168.200.1')])
+		interfaces = ([('eth0', getNetworkInterfaceConfiguration('eth0'))])
 	else:
-		interfaces = ([('eth0', '192.168.200.1') , ('eth1', 'dhcp')])
+		interfaces = ([('eth0', getNetworkInterfaceConfiguration('eth0')) , ('eth1', getNetworkInterfaceConfiguration('eth1'))])
 		
 	if wifiEnabled:
-		interfaces.append(('wlan0', 'dhcp'))
+		interfaces.append(('wlan0', getNetworkInterfaceConfiguration('wlan0')))
 		
 	ret = EntryWindow(
 		networkScreen,
@@ -364,7 +368,7 @@ iface wlan0 inet static
 				interfacesConfig = interfacesConfig + dhcpTemplate.replace("[interfaceName]", interface[0])
 			else:
 				interfacesConfig = interfacesConfig + staticTemplate.replace("[interfaceName]", interface[0]).replace("[ip]", ret[1][i])
-		i = i+1
+		i += 1
 	
 	if ret[0] == "ok":
 		fileName = "/etc/network/interfaces"
@@ -397,16 +401,10 @@ def expandFileSystem():
 	bt = Button("OK")
 	gf.add(lab, 0,0)
 	gf.add(bt, 0,2)
-	
-	
+		
 	r = gf.runOnce()
-	
 	expandScreen.finish()
-
+	
 	displayStartScreen()
 
-
 displayStartScreen()	
-
-
-
