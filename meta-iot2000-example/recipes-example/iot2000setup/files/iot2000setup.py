@@ -14,7 +14,7 @@ from shutil import copyfile
 
 networkConfigurationChanged = False
 wifiEnabled = True
-
+wifiInterfaceConfigured = True
 deviceIsIot2020 = False
 def displayStartScreen():
 	global wifiEnabled
@@ -29,6 +29,12 @@ def displayStartScreen():
 	# Check if WLAN hardware is available	
 	wifiEnabled = os.path.isdir("/sys/class/net/wlan0")
 	
+	# Check if WLAN network interface is available
+	with open("/etc/network/interfaces", "r") as interfacesFile:
+		interfacesContent=interfacesFile.read()
+	
+	wifiInterfaceConfigured = "wlan" in interfacesContent
+
 	
 	title = device + " Setup"
 	menuItems = [	"Change Root Password", "Change Host Name",
@@ -42,7 +48,7 @@ def displayStartScreen():
 	# Enable serial mode setting if device is IOT2040
 	if (not deviceIsIot2020):	
 		menuItems.append("Set Serial Mode") 
-	if wifiEnabled:
+	if (wifiEnabled and wifiInterfaceConfigured):
 		menuItems.append("Configure WLAN")
 			
 	action, selection = ListboxChoiceWindow(
@@ -79,7 +85,7 @@ def displayStartScreen():
 	elif selection == 6:
 		if (not deviceIsIot2020):
 			configureSerial()
-		elif wifiEnabled:
+		elif (wifiEnabled and wifiInterfaceConfigured):
 			configureWLAN()
 	elif selection == 7:
 		configureWLAN()
@@ -393,9 +399,11 @@ iface wlan0 inet static
 
 def expandFileSystem():
 	subprocess.call("/etc/iot2000setup/expandfs.sh", stdout=open(os.devnull, 'wb')) 
+	task = subprocess.Popen("df -h | grep '/dev/root' | awk '{print $2}'", stdout=subprocess.PIPE, shell=True)
+	newPartitionSize = task.stdout.read().lstrip().rstrip()
 
 	expandScreen = SnackScreen()
-	lab = Label("File system will be expanded on next reboot.")
+	lab = Label("Successfully expanded file system. New partition size is: " + newPartitionSize)
 	gf = GridForm(expandScreen, "Expand File System", 1, 4)
 
 	bt = Button("OK")
