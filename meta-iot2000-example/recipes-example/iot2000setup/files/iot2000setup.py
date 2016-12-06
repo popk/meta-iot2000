@@ -9,15 +9,16 @@ from subprocess import Popen, PIPE
 from subprocess import check_output
 import subprocess
 import os
+import os.path
 from shutil import copyfile
 
-networkConfigurationChanged = 0
-wifiEnabled = 0
-device = ""
+networkConfigurationChanged = False
+wifiEnabled = True
 
+deviceIsIot2020 = False
 def displayStartScreen():
 	global wifiEnabled
-	global device
+	global deviceIsIot2020
 	
 	screen = SnackScreen()
 
@@ -35,13 +36,18 @@ def displayStartScreen():
 	title = device + " Setup"
 	menuItems = [	"Change Root Password", "Change Host Name", 
 					"Expand File System", "Configure Network Interfaces", 
-					"Configure WLAN", "Set up OPKG Repository", 
+					"Set up OPKG Repository", 
 					"Remove Unused Packages"]
 	
+	if (device == "IOT2020"):
+		deviceIsIot2020 = True
+	
 	# Enable serial mode setting if device is IOT2040
-	if (device == "IOT2040" or device == "IOT20x0"):
+	if (not deviceIsIot2020):	
 		menuItems.append("Set Serial Mode") 
-		
+	if wifiEnabled:
+		menuItems.append("Configure WLAN")
+			
 	action, selection = ListboxChoiceWindow(
 		screen, 
 		title, "", 
@@ -51,7 +57,7 @@ def displayStartScreen():
 	screen.finish()
 
 	if (action == 'quit'):
-		if (networkConfigurationChanged == 1):
+		if (networkConfigurationChanged == True):
 			print(chr(27) + "[2J") # Clear console
 			print("Restarting network services...")
 			subprocess.call("/etc/init.d/networking restart", shell=True)
@@ -59,6 +65,7 @@ def displayStartScreen():
 			subprocess.call("/sbin/ifup wlan0", shell=True)
 		
 		exit()
+	print (selection)
 	
 	if selection == 0:
 		changeRootPassword()
@@ -69,13 +76,16 @@ def displayStartScreen():
 	elif selection == 3:
 		configureNetworkInterfaces()
 	elif selection == 4:
-		configureWLAN()
-	elif selection == 5:
 		configureOpkgRepository()
-	elif selection == 6:
+	elif selection == 5:
 		removeUnusedPackages()
+	elif selection == 6:
+		if (not deviceIsIot2020):
+			configureSerial()
+		elif wifiEnabled:
+			configureWlan()
 	elif selection == 7:
-		configureSerial()
+		configureWlan()
 
 def changeRootPassword():
 	print(chr(27) + "[2J") # Clear console 
@@ -114,7 +124,7 @@ def removeUnusedPackages():
 	result = g.runOnce()
 	
 	removeList = ''
-	if (bb.buttonPressed(result) == "ok" and numberOfRemovablePackages):
+	if (bb.buttonPressed(result) == "ok" and numberOfRemovablePackages > 0):
 		# Build list of selected packages
 		selectedPackages = ct.getSelection()
 		for package in selectedPackages:
@@ -200,56 +210,19 @@ def configureOpkgRepository():
 		['OK', ('Cancel', 'cancel', 'ESC')],
 		None)
 	
-	fileTemplate = '''# Must have one or more source entries of the form:
-#
-#   src <src-name> <source-url>
-#
-# and one or more destination entries of the form:
-#
-#   dest <dest-name> <target-path>
-#
-# where <src-name> and <dest-names> are identifiers that
-# should match [a-zA-Z0-9._-]+, <source-url> should be a
-# URL that points to a directory containing a Familiar
-# Packages file, and <target-path> should be a directory
-# that exists on the target system.
-
-# Proxy Support
-#option http_proxy http://proxy.tld:3128
-#option ftp_proxy http://proxy.tld:3128
-#option proxy_username <username>
-#option proxy_password <password>
-
-# Enable GPGME signature
-# option check_signature 1
-
-# Offline mode (for use in constructing flash images offline)
-#option offline_root target
-
-# Default destination for installed packages
-dest root /
-option lists_dir /var/lib/opkg/lists
-
-src/gz all http://[host]/ipk/all
+	fileTemplate = '''src/gz all http://[host]/ipk/all
 src/gz i586-nlp-32 http://[host]/ipk/i586-nlp-32
 src/gz i586-nlp-32-intel-common http://[host]/ipk/i586-nlp-32-intel-common
 src/gz iot2000 http://[host]/ipk/iot2000
 '''
 	if ret[0] == "ok":
 		opkgConfig = fileTemplate.replace("[host]", ret[1][0].rstrip())
-		fileName = "/etc/opkg/opkg.conf"
-		backupFileName = "/etc/opkg/opkg.conf.bak"
-		copyfile(fileName, backupFileName)
+		fileName = "/etc/opkg/iot2000.conf"
+		
 		opkgFile = open(fileName, 'w')
 		opkgFile.write(opkgConfig)
 		opkgFile.close()
-
-		rv = ButtonChoiceWindow(
-				opkgScreen,
-				"Configure OPKG",
-				"Your OPKG configuration has been changed. A backup of the old configuration can be found at: " + backupFileName,
-				buttons=["OK"],
-				width=40)
+		
 				
 	opkgScreen.finish()	
 	displayStartScreen()
@@ -303,14 +276,31 @@ network={
 	wlanScreen.finish()
 	displayStartScreen()
 
+def getNetworkInterfaceConfiguration(interface):
+	lines = [line.rstrip('\n') for line in open('/etc/network/interfaces')]
+	for lineNumber in range(0, len(lines)-1):
+		if ("auto " + interface in lines[lineNumber]):
+			while (lines[lineNumber].split()[0] != interface):
+				lineNumber += 1
+			mode = lines[lineNumber].split()[3]
+
+			if (mode == "dhcp"):
+				return "dhcp"
+			if (mode == "static"):
+				return "12323"
+			print (mode)
+			time.sleep(10)
+
+			
+
 def configureNetworkInterfaces():
 	global networkConfigurationChanged
 	global wifiEnabled
-	global device
+	global deviceIsIot2020
 	
 	networkScreen = SnackScreen()
-			
-	if device == "IOT2000":
+	getNetworkInterfaceConfiguration('eth0')
+	if deviceIsIot2020:
 		interfaces = ([('eth0', '192.168.200.1')])
 	else:
 		interfaces = ([('eth0', '192.168.200.1') , ('eth1', 'dhcp')])
