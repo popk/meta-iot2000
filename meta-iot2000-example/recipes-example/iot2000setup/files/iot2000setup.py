@@ -228,9 +228,6 @@ def configureSerial():
 				st = os.stat(fileName)
 				os.chmod(fileName, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 				
-			
-			
-			
 	displayStartScreen()
 
 def changeHostName():
@@ -447,15 +444,12 @@ def expandFileSystem():
 	task = subprocess.Popen("df -h | grep '/dev/root' | awk '{print $2}'", stdout=subprocess.PIPE, shell=True)
 	newPartitionSize = task.stdout.read().lstrip().rstrip()
 
-
-	lab = Label("Successfully expanded file system. New partition size is: " + newPartitionSize)
-	gf = GridForm(gscreen, "Expand File System", 1, 4)
-
-	bt = Button("OK")
-	gf.add(lab, 0,0)
-	gf.add(bt, 0,2)
-		
-	r = gf.runOnce()
+	rv = ButtonChoiceWindow(
+				gscreen,
+				"Expand File System",
+				"Successfully expanded file system. New partition size is " + newPartitionSize + ".",
+				buttons=["OK"],
+				width=40)
 
 	displayStartScreen()
 
