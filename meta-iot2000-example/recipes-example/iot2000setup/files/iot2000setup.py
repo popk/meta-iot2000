@@ -21,16 +21,6 @@ deviceIsIot2020 = False
 def initScreen():
 	global gscreen
 	gscreen = SnackScreen()
-	gscreen.setColor("ROOT", "white", "lightblue")
-	gscreen.setColor("BUTTON", "white", "cyan")
-	gscreen.setColor("ENTRY", "white", "cyan")
-	gscreen.setColor("LABEL", "black", "lightgray")
-	gscreen.setColor("SELLISTBOX", "white", "gray")
-	gscreen.setColor("ACTBUTTON", "white", "gray")
-	gscreen.setColor("ACTLISTBOX", "white", "gray")
-	gscreen.setColor("ACTSELLISTBOX", "white", "cyan")
-	gscreen.setColor("TITLE", "cyan", "lightgray")
-	gscreen.setColor("HELPLINE", "white", "cyan")
 	
 def displayStartScreen():
 	global wifiEnabled
