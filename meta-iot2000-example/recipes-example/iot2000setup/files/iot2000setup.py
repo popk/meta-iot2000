@@ -10,18 +10,34 @@ from subprocess import check_output
 import subprocess
 import os
 import os.path
+import stat
 from shutil import copyfile
 
 networkConfigurationChanged = False
 wifiEnabled = True
 wifiInterfaceConfigured = True
 deviceIsIot2020 = False
+
+def initScreen():
+	global gscreen
+	gscreen = SnackScreen()
+	gscreen.setColor("ROOT", "white", "lightblue")
+	gscreen.setColor("BUTTON", "white", "cyan")
+	gscreen.setColor("ENTRY", "white", "cyan")
+	gscreen.setColor("LABEL", "black", "lightgray")
+	gscreen.setColor("SELLISTBOX", "white", "gray")
+	gscreen.setColor("ACTBUTTON", "white", "gray")
+	gscreen.setColor("ACTLISTBOX", "white", "gray")
+	gscreen.setColor("ACTSELLISTBOX", "white", "cyan")
+	gscreen.setColor("TITLE", "cyan", "lightgray")
+	gscreen.setColor("HELPLINE", "white", "cyan")
+	
 def displayStartScreen():
 	global wifiEnabled
 	global deviceIsIot2020
 	
-	screen = SnackScreen()
-
+	initScreen()
+	
 	# Use dmidecode to determine device type (IOT2040/IOT2000)
 	task = subprocess.Popen("/usr/sbin/dmidecode -t 11 | awk 'NR==8' | cut -f 2 -d :", stdout=subprocess.PIPE, shell=True)
 	device = task.stdout.read().lstrip().rstrip()
@@ -34,7 +50,6 @@ def displayStartScreen():
 		interfacesContent=interfacesFile.read()
 	
 	wifiInterfaceConfigured = "wlan" in interfacesContent
-
 	
 	title = device + " Setup"
 	menuItems = [	"Change Root Password", "Change Host Name",
@@ -52,17 +67,16 @@ def displayStartScreen():
 		menuItems.append("Configure WLAN")
 			
 	action, selection = ListboxChoiceWindow(
-		screen, 
+		gscreen, 
 		title, "", 
 		menuItems, 
 		[('Quit', 'quit', 'ESC')])
 
-	screen.finish()
-
 	if (action == 'quit'):
+		gscreen.finish()
 		if (networkConfigurationChanged == True):
 			print(chr(27) + "[2J") # Clear console
-			print("Restarting network services...")
+			print("\033[1;34mRestarting network services...\033[0m\n")
 			subprocess.call("/etc/init.d/networking restart", shell=True)
 			if (wifiEnabled):
 				subprocess.call("/sbin/ifdown wlan0", shell=True)
@@ -91,6 +105,7 @@ def displayStartScreen():
 		configureWLAN()
 
 def changeRootPassword():
+	gscreen.finish()
 	print(chr(27) + "[2J") # Clear console 
 	
 	subprocess.call(["passwd", "root"])
@@ -102,8 +117,7 @@ def removeUnusedPackages():
 												# candidates for removal
 	###
 	
-	packageScreen = SnackScreen()
-	bb = ButtonBar(packageScreen, (("Ok", "ok"), ("Cancel", "cancel")))
+	bb = ButtonBar(gscreen, (("Ok", "ok"), ("Cancel", "cancel")))
 	ct = CheckboxTree(height = 10, scroll = 1,width=40)
 
 	# Iterate through list of removal candidates and check if they are 
@@ -113,11 +127,11 @@ def removeUnusedPackages():
 	
 	numberOfRemovablePackages = 0
 	for package in packageList:
-		if package in installedPackages:
+		if (package in installedPackages):
 			ct.append(package)
 			numberOfRemovablePackages += 1
 
-	g = GridForm(packageScreen, "Select Packages to Remove", 1, 4)
+	g = GridForm(gscreen, "Select Packages to Remove", 1, 4)
 	l = Label("Use 'Space' to select the packages you want to remove.")
 	g.add(l, 0, 0, growy=1, growx=1, padding=(1,1,1,1))
 	g.add(ct, 0, 1)
@@ -132,59 +146,98 @@ def removeUnusedPackages():
 			removeList = removeList + package + '* '
 		
 		ret = ButtonChoiceWindow(
-			packageScreen,
+			gscreen,
 			"Remove Packages",
 			"Are you sure you want to remove the following packages: \n\n" + removeList,
 			buttons=[("OK", "ok"), ("Cancel", "cancel", "ESC")],
 			width=40)
 		
-		packageScreen.finish()
-				
 		if (ret == "ok"):	
 			removeList = "/usr/bin/opkg --force-removal-of-dependent-packages remove " + removeList
+			gscreen.finish()
 			print(chr(27) + "[2J") # Clear console 
-			print("Removing selected packages...")
+			print("\033[1;34mRemoving selected packages...\033[0m\n")
 			subprocess.call(removeList, shell=True)
 
 	displayStartScreen()
+
+
+def getSerialModeForPort(port):
+	fileName = "/etc/init.d/set_serial_mode_" + port + ".sh"
+
+	if (os.path.isfile(fileName)):
+		lines = [line.rstrip('\n') for line in open(fileName)]
+		selectedMode = lines[1].split()[2]
+		
+		if selectedMode == "rs232":
+			return 0
+		elif selectedMode == "rs485":
+			return 1
+		elif selectedMode == "rs422":
+			return 2
+	return 0
 	
 def configureSerial():
-	serialScreen = SnackScreen()
-		
+
 	portAction, portSelection = ListboxChoiceWindow(
-		serialScreen, 
+		gscreen, 
 		"Configure Serial Mode", "Select the serial port you want to configure and press 'Enter'.", 
 		["X30", "X31"], 
 		[('Cancel', 'cancel', 'ESC')])
+	if (portSelection == 0):
+		portName = "X30"
+	else:
+		portName = "X31"
+	
+	currentMode = getSerialModeForPort(portName)
 
 	if (portAction != "cancel"):
 		modes = ["RS232", "RS485", "RS422"]
 		
 		modeAction, modeSelection = ListboxChoiceWindow(
-			serialScreen, 
+			gscreen, 
 			"Configure Serial Mode", "Select a mode.", 
 			modes, 
-			[('Cancel', 'cancel', 'ESC')])
+			[('Cancel', 'cancel', 'ESC')], default=currentMode)
 		
 		if (modeAction != "cancel"):
-			switchCommand = '/usr/bin/switchserialmode'
+			persistentReturn = ButtonChoiceWindow(
+				gscreen,
+				"Configure Serial Mode",
+				"Do you want to make your changes persistent? (Mode setting will be kept after reboot.) ",
+				buttons=[("Yes", "yes"), ("No", "no", "ESC")],
+				width=40)
+			switchTool = '/usr/bin/switchserialmode'
 			
-			if (portSelection == "X30"):
+			if (portSelection == 0):
 				switchDeviceArg = '/dev/ttyS2'
 			else:
 				switchDeviceArg = '/dev/ttyS3'
 			
 			switchModeArg = modes[modeSelection].lower()
-			subprocess.Popen([switchCommand, switchDeviceArg, switchModeArg], stdout=open(os.devnull, 'wb'))
+			switchCommand = switchTool + " " + switchDeviceArg + " " + switchModeArg
+			subprocess.Popen([switchTool, switchDeviceArg, switchModeArg], stdout=open(os.devnull, 'wb'))
+			
+			if (persistentReturn == "yes"):
+				
+				fileName = "/etc/init.d/set_serial_mode_" + portName + ".sh"
+				initFile = open(fileName, 'w')
+				initFile.write("#!/bin/sh\n" + switchCommand)
+				initFile.close()
+				
+				st = os.stat(fileName)
+				os.chmod(fileName, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+				
+			
+			
 			
 	displayStartScreen()
 
 def changeHostName():
-	hostScreen = SnackScreen()
 	currentHostName = subprocess.check_output("hostname")
 	
 	ret = EntryWindow(
-		hostScreen,
+		gscreen,
 		"Change Host Name",
 		"",
 		[("Host Name:", currentHostName)],
@@ -193,17 +246,15 @@ def changeHostName():
 		[('OK'), ('Cancel', 'cancel', 'ESC')],
 		None)
 		
-	if ret[0] == "ok":
-		hostScreen.finish()
+	if (ret[0] == "ok"):
 		subprocess.Popen(["hostname", ret[1][0].rstrip()], stdout=open(os.devnull, 'wb'))
 		
 	displayStartScreen()
 	
 def configureOpkgRepository():
-	opkgScreen = SnackScreen()
 
 	ret = EntryWindow(
-		opkgScreen,
+		gscreen,
 		"Configure OPKG Repository",
 		"",
 		[("Host Address:", "")],
@@ -217,25 +268,22 @@ src/gz i586-nlp-32 http://[host]/ipk/i586-nlp-32
 src/gz i586-nlp-32-intel-common http://[host]/ipk/i586-nlp-32-intel-common
 src/gz iot2000 http://[host]/ipk/iot2000
 '''
-	if ret[0] == "ok":
+	if (ret[0] == "ok"):
 		opkgConfig = fileTemplate.replace("[host]", ret[1][0].rstrip())
 		fileName = "/etc/opkg/iot2000.conf"
 		
 		opkgFile = open(fileName, 'w')
 		opkgFile.write(opkgConfig)
 		opkgFile.close()
-		
-				
-	opkgScreen.finish()	
+						
 	displayStartScreen()
 
 
 def configureWLAN():
-	wlanScreen = SnackScreen()
 	global networkConfigurationChanged
 	
 	ret = EntryWindow(
-		wlanScreen,
+		gscreen,
 		"Configure WLAN",
 		"",
 		[("Type:", "WPA-PSK"), ("SSID:", ""), ("Key:", "")],
@@ -254,7 +302,7 @@ network={
 	psk="[passwd]"
 }'''
 
-	if ret[0] == "ok":
+	if (ret[0] == "ok"):
 		wpaConfig = fileTemplate.replace("[type]", ret[1][0].rstrip()).replace("[ssid]", ret[1][1].rstrip()).replace("[passwd]", ret[1][2].rstrip())
 		
 		fileName = "/etc/wpa_supplicant.conf"
@@ -267,7 +315,7 @@ network={
 		wpaFile.close()
 
 		rv = ButtonChoiceWindow(
-				wlanScreen,
+				gscreen,
 				"Configure WLAN",
 				"Your WLAN configuration has been changed. A backup of the old configuration can be found at: " + backupFileName,
 				buttons=["OK"],
@@ -275,11 +323,9 @@ network={
 				
 		networkConfigurationChanged = 1
 	
-	wlanScreen.finish()
 	displayStartScreen()
 
 def getNetworkInterfaceConfiguration(interface):
-
 	lines = [line.rstrip('\n') for line in open('/etc/network/interfaces')]
 	for lineNumber in range(0, len(lines)-1):
 		searchString = "auto " + interface
@@ -300,7 +346,9 @@ def getNetworkInterfaceConfiguration(interface):
 					lineNumber += 1
 					splitLine = lines[lineNumber].split()
 				return splitLine[1]
+				
 		lineNumber += 1
+		
 	return "dhcp"	
 
 def configureNetworkInterfaces():
@@ -308,8 +356,6 @@ def configureNetworkInterfaces():
 	global wifiEnabled
 	global deviceIsIot2020
 	
-	networkScreen = SnackScreen()
-	getNetworkInterfaceConfiguration('eth0')
 	if deviceIsIot2020:
 		interfaces = ([('eth0', getNetworkInterfaceConfiguration('eth0'))])
 	else:
@@ -319,7 +365,7 @@ def configureNetworkInterfaces():
 		interfaces.append(('wlan0', getNetworkInterfaceConfiguration('wlan0')))
 		
 	ret = EntryWindow(
-		networkScreen,
+		gscreen,
 		"Configure Network Interfaces",
 		"Specify IP addresses for network interfaces, enter 'dhcp' to obtain address by DHCP.",
 		interfaces,
@@ -364,19 +410,19 @@ iface wlan0 inet static
 	
 	i = 0
 	for interface in interfaces:
-		if interface[0] == "wlan0":
-			if ret[1][i] == "dhcp":
+		if (interface[0] == "wlan0"):
+			if (ret[1][i] == "dhcp"):
 				interfacesConfig = interfacesConfig + wirelessDhcpTemplate.replace("[interfaceName]", interface[0])
 			else:
 				interfacesConfig = interfacesConfig + wirelessStaticTemplate.replace("[interfaceName]", interface[0]).replace("[ip]", ret[1][i])
 		else:
-			if ret[1][i] == "dhcp":
+			if (ret[1][i] == "dhcp"):
 				interfacesConfig = interfacesConfig + dhcpTemplate.replace("[interfaceName]", interface[0])
 			else:
 				interfacesConfig = interfacesConfig + staticTemplate.replace("[interfaceName]", interface[0]).replace("[ip]", ret[1][i])
 		i += 1
 	
-	if ret[0] == "ok":
+	if (ret[0] == "ok"):
 		fileName = "/etc/network/interfaces"
 		backupFileName = "/etc/network/interfaces.bak"
 		copyfile(fileName, backupFileName)
@@ -386,33 +432,31 @@ iface wlan0 inet static
 		
 		networkConfigurationChanged = 1
 		rv = ButtonChoiceWindow(
-				networkScreen,
+				gscreen,
 				"Configure Network Interfaces",
 				"Your network interfaces have been reconfigured. A backup of the old configuration can be found at: " + backupFileName,
 				buttons=["OK"],
 				width=40)
 
-				
-	networkScreen.finish()
 	displayStartScreen()
 	
 
 def expandFileSystem():
+	
 	subprocess.call("/etc/iot2000setup/expandfs.sh", stdout=open(os.devnull, 'wb')) 
 	task = subprocess.Popen("df -h | grep '/dev/root' | awk '{print $2}'", stdout=subprocess.PIPE, shell=True)
 	newPartitionSize = task.stdout.read().lstrip().rstrip()
 
-	expandScreen = SnackScreen()
+
 	lab = Label("Successfully expanded file system. New partition size is: " + newPartitionSize)
-	gf = GridForm(expandScreen, "Expand File System", 1, 4)
+	gf = GridForm(gscreen, "Expand File System", 1, 4)
 
 	bt = Button("OK")
 	gf.add(lab, 0,0)
 	gf.add(bt, 0,2)
 		
 	r = gf.runOnce()
-	expandScreen.finish()
-	
+
 	displayStartScreen()
 
 displayStartScreen()	
