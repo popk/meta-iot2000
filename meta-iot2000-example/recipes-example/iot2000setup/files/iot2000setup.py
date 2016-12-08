@@ -45,7 +45,7 @@ def displayStartScreen():
 	menuItems = [	"Change Root Password", "Change Host Name",
 					"Expand File System", "Configure Network Interfaces",
 					"Set up OPKG Repository",
-					"Remove Unused Packages"]
+					"Remove Unused Packages", "Advanced Options -->"]
 		
 	if (device == "IOT2020"):
 		deviceIsIot2020 = True
@@ -87,12 +87,68 @@ def displayStartScreen():
 	elif selection == 5:
 		removeUnusedPackages()
 	elif selection == 6:
+		advancedOptions()
+	elif selection == 7:
 		if (not deviceIsIot2020):
 			configureSerial()
 		elif (wifiEnabled and wifiInterfaceConfigured):
 			configureWLAN()
-	elif selection == 7:
+	elif selection == 8:
 		configureWLAN()
+
+def changeNodeRedAutoStart(status):
+	if (status == "on"):
+		fileName = "/etc/init.d/launch_node-red.sh"
+		initFile = open(fileName, 'w')
+		initFile.write("#!/bin/sh\n" + "/usr/bin/node /usr/lib/node_modules/node-red/red ")
+		initFile.close()
+					
+		st = os.stat(fileName)
+		os.chmod(fileName, st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+	elif (status == "off"):
+		os.remove("/etc/init.d/launch_node-red.sh")
+		
+def changeSshServerSetting(status):
+	if (status == "on"):
+		subprocess.call("update-rc.d -f sshd defaults", shell=True, stdout=open(os.devnull, 'wb'))
+		subprocess.call("/etc/init.d/sshd start", shell=True, stdout=open(os.devnull, 'wb'))
+	elif (status == "off"):
+		subprocess.call("/etc/init.d/sshd stop", shell=True, stdout=open(os.devnull, 'wb'))
+		subprocess.call("update-rc.d -f sshd remove", shell=True, stdout=open(os.devnull, 'wb'))
+	
+def advancedOptions():
+	sshEnabled = os.path.isfile("/etc/rc0.d/K20sshd")
+	noderedAutostartEnabled = os.path.isfile("/etc/init.d/launch_node-red.sh")
+	
+	bb = ButtonBar(gscreen, [("Done", "done", "ESC")])
+	ct = CheckboxTree(height = 7, scroll = 1,width=40)
+
+	ct.append("Auto Start node-red", selected=noderedAutostartEnabled)
+	ct.append("SSH Server Enabled", selected=sshEnabled)
+
+	g = GridForm(gscreen, "Advanced Options", 1, 4)
+	g.add(ct, 0, 1)
+	g.add(bb, 0, 3, growx = 1)
+	result = g.runOnce()
+	selectedOptions = ct.getSelection()
+
+	
+	noderedAutostartEnabledNew = "Auto start node-red" in selectedOptions
+	sshEnabledNew = "SSH Server Enabled" in selectedOptions
+	
+	if (noderedAutostartEnabled != noderedAutostartEnabledNew):
+		if ("Auto start node-red" in selectedOptions):
+			changeNodeRedAutoStart("on")
+		else:
+			changeNodeRedAutoStart("off")
+			
+	if (sshEnabled != sshEnabledNew):
+		if ("SSH Server Enabled" in selectedOptions):
+			changeSshServerSetting("on")
+		else:
+			changeSshServerSetting("off")
+
+	displayStartScreen()
 
 def changeRootPassword():
 	gscreen.finish()
@@ -444,3 +500,4 @@ def expandFileSystem():
 	displayStartScreen()
 
 displayStartScreen()	
+
